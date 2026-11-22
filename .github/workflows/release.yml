@@ -1,0 +1,27 @@
+name: Publish v0.2.1
+on:
+  push:
+    branches: [main]
+    paths: ['dist/**', '.github/workflows/release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify release artifact
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+      - name: Publish verified JAR and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if gh release view v0.2.1 >/dev/null 2>&1; then exit 0; fi
+          gh release create v0.2.1 --target "$GITHUB_SHA" --title 'Homematic IP Cloud v0.2.1' \
+            --notes-file docs/RELEASE.md dist/org.openhab.binding.homematicipcloud-5.3.0-SNAPSHOT.jar dist/SHA256SUMS

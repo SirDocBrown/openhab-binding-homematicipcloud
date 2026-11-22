@@ -1,0 +1,6 @@
+<addon:addon xmlns:addon="https://openhab.org/schemas/addon/v1.0.0" id="homematicipcloud">
+	<type>binding</type>
+	<name>Homematic IP Cloud</name>
+	<description>Connect Homematic IP devices and groups through the access point.</description>
+	<connection>cloud</connection>
+</addon:addon>

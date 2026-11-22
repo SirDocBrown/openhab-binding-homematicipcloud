@@ -1,0 +1,142 @@
+<?xml version='1.0' encoding='utf-8'?>
+<thing:thing-descriptions xmlns:thing="https://openhab.org/schemas/thing-description/v1.0.0"
+	bindingId="homematicipcloud">
+	<bridge-type id="accesspoint">
+		<label>Homematic IP Access Point</label>
+		<description>Connects to the cloud using the access point serial number and system button.</description>
+		<config-description>
+			<parameter name="sgtin" type="text" required="true">
+				<label>Access Point SGTIN</label>
+				<description>24 hexadecimal characters printed on the access point.</description>
+			</parameter>
+			<parameter name="pin" type="text">
+				<context>password</context>
+				<label>System PIN</label>
+			</parameter>
+			<parameter name="token" type="text">
+				<context>password</context>
+				<label>Cloud Token</label>
+				<description>Leave empty for initial pairing.</description>
+			</parameter>
+			<parameter name="discoverGroups" type="boolean">
+				<label>Discover Groups</label>
+				<description>Include Homematic IP cloud groups in inbox scans.</description>
+				<default>false</default>
+			</parameter>
+		</config-description>
+	</bridge-type>
+	<thing-type id="device">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="accesspoint"/>
+		</supported-bridge-type-refs>
+		<label>Homematic IP Device</label>
+		<description>Channels are created from reported cloud capabilities.</description>
+		<representation-property>cloudId</representation-property>
+		<config-description>
+			<parameter name="cloudId" type="text" required="true">
+				<label>Cloud ID</label>
+			</parameter>
+		</config-description>
+	</thing-type>
+	<thing-type id="group">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="accesspoint"/>
+		</supported-bridge-type-refs>
+		<label>Homematic IP Group</label>
+		<description>Channels are created from reported cloud capabilities.</description>
+		<representation-property>cloudId</representation-property>
+		<config-description>
+			<parameter name="cloudId" type="text" required="true">
+				<label>Cloud ID</label>
+			</parameter>
+		</config-description>
+	</thing-type>
+	<channel-type id="text">
+		<item-type>String</item-type>
+		<label>Text</label>
+		<state readOnly="true"/>
+	</channel-type>
+	<channel-type id="number">
+		<item-type>Number</item-type>
+		<label>Measurement</label>
+		<state readOnly="true"/>
+	</channel-type>
+	<channel-type id="flag">
+		<item-type>Switch</item-type>
+		<label>Status</label>
+		<state readOnly="true"/>
+	</channel-type>
+	<channel-type id="window">
+		<item-type>Contact</item-type>
+		<label>Window State</label>
+		<state readOnly="true"/>
+	</channel-type>
+	<channel-type id="roller">
+		<item-type>Rollershutter</item-type>
+		<label>Shutter Position</label>
+		<state readOnly="false"/>
+	</channel-type>
+	<channel-type id="slats">
+		<item-type>Dimmer</item-type>
+		<label>Slat Position</label>
+		<state readOnly="false"/>
+	</channel-type>
+	<channel-type id="dimmer">
+		<item-type>Dimmer</item-type>
+		<label>Brightness</label>
+		<state readOnly="false"/>
+	</channel-type>
+	<channel-type id="power">
+		<item-type>Switch</item-type>
+		<label>Power</label>
+		<state readOnly="false"/>
+	</channel-type>
+	<channel-type id="target">
+		<item-type>Number</item-type>
+		<label>Target Temperature (°C)</label>
+		<state readOnly="false"/>
+	</channel-type>
+	<channel-type id="boost">
+		<item-type>Switch</item-type>
+		<label>Boost</label>
+		<state readOnly="false"/>
+	</channel-type>
+	<channel-type id="mode">
+		<item-type>String</item-type>
+		<label>Heating Mode</label>
+		<state readOnly="false"/>
+	</channel-type>
+	<channel-type id="profile">
+		<item-type>Number</item-type>
+		<label>Heating Profile</label>
+		<state readOnly="false"/>
+	</channel-type>
+	<channel-type id="palette">
+		<item-type>String</item-type>
+		<label>Signal Colour</label>
+	</channel-type>
+	<channel-type id="paletteDim">
+		<item-type>Dimmer</item-type>
+		<label>Signal Brightness</label>
+	</channel-type>
+	<channel-type id="unreachable">
+		<item-type>Switch</item-type>
+		<label>Unreachable</label>
+		<state readOnly="true"/>
+	</channel-type>
+	<channel-type id="diagnostic-text" advanced="true">
+		<item-type>String</item-type>
+		<label>Diagnostic Text</label>
+		<state readOnly="true"/>
+	</channel-type>
+	<channel-type id="diagnostic-number" advanced="true">
+		<item-type>Number</item-type>
+		<label>Diagnostic Value</label>
+		<state readOnly="true"/>
+	</channel-type>
+	<channel-type id="diagnostic-flag" advanced="true">
+		<item-type>Switch</item-type>
+		<label>Diagnostic Status</label>
+		<state readOnly="true"/>
+	</channel-type>
+</thing:thing-descriptions>
