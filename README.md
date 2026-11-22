@@ -1,42 +1,71 @@
-# Homematic IP Cloud Binding für openHAB
+# Homematic IP Cloud Binding for openHAB
 
-Dieses Community-Binding verbindet openHAB über den Homematic IP Access Point mit der Homematic-IP-Cloud. Geräte erscheinen als Things in openHAB. Ein Fensterkontakt kann beispielsweise eine Heizungsregel auslösen, ein Rollladen lässt sich über ein Rollershutter-Item bedienen. Für diese Verbindung sind ein Access Point mit Internetzugang und die dort angelernten Geräte ausreichend.
+Connect Homematic IP devices to openHAB through an internet-connected access point and the Homematic IP cloud. Devices appear as openHAB Things. For example, a window contact can trigger a heating rule, and a Rollershutter Item can control a blind.
 
-**Kompatibilität:** Die Maven-JAR wurde mit Java 21 gebaut und gegen den Karaf-Feature-Katalog von openHAB **5.3.0.M5** geprüft. Kopplung und Fensterzustand wurden in einer früheren Version an einem HmIP-HAP2 mit HmIP-SWDM im Haushalt bestätigt. Das Binding verwendet die inoffizielle Cloud-Schnittstelle. Die Bedienung weiterer Geräte hängt von den Funktionskanälen ab, die die Cloud meldet.
+**Compatibility.** Release v0.2.1 was built with Java 21 and verified against the openHAB 5.3.0.M5 Karaf feature catalogue. Pairing and window-state updates were confirmed on an HmIP-HAP2 with an HmIP-SWDM contact using an earlier binding version. The binding uses an unofficial cloud interface. Available channels depend on the capabilities reported by each device.
 
-[Release-Downloads](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases) · [JAR im Repository](dist/org.openhab.binding.homematicipcloud-5.3.0-SNAPSHOT.jar) · [Build und Tests](docs/DEVELOPMENT.md) · [English guide](docs/README.en.md)
+[Download the v0.2.1 JAR](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases/download/v0.2.1/org.openhab.binding.homematicipcloud-5.3.0-SNAPSHOT.jar) · [Release notes and checksum](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases/tag/v0.2.1) · [Build and tests](docs/DEVELOPMENT.md)
 
-## Installation und erstes Gerät
+## Install and pair an access point
 
-1. Lade die JAR und auf Wunsch die Datei `SHA256SUMS` herunter. Im Downloadordner prüft `shasum -a 256 -c SHA256SUMS` unter macOS die Datei. Unter Linux lautet der Befehl `sha256sum -c SHA256SUMS`.
-2. Kopiere die JAR in den Add-ons-Ordner deiner openHAB-Installation. Bei Docker und QNAP Container Station ist das der Hostordner, der auf `/openhab/addons` gemountet ist. Der Benutzer `openhab` im Container braucht Leserechte auf die Datei und Zugriff auf den Ordner.
-3. Öffne **Einstellungen → Things → + → Homematic IP Cloud** und lege einen **Homematic IP Access Point** an. Trage die 24-stellige SGTIN vom Geräteaufkleber ein. Falls eine System-PIN gesetzt ist, trage sie ebenfalls ein. Lass das Token-Feld bei der ersten Kopplung leer.
-4. Warte auf die Aufforderung in der Bridge und drücke kurz die Systemtaste am Access Point. Das Kopplungsfenster beträgt zwei Minuten. openHAB speichert das bestätigte Token in der Bridge.
-5. Sobald die Bridge **ONLINE** ist, starte unter **Things → + → Homematic IP Cloud** den Scan. Übernimm das gewünschte Gerät aus der Inbox. Öffne am Gerät den Reiter **Channels** und verknüpfe den gewünschten Channel mit einem Item.
+1. Download the JAR. To verify it, download `SHA256SUMS` into the same folder and run `shasum -a 256 -c SHA256SUMS` on macOS or `sha256sum -c SHA256SUMS` on Linux.
+2. Copy the JAR into your openHAB add-ons folder. With Docker or QNAP Container Station, use the host folder mounted at `/openhab/addons`. The container user must be able to open the folder and read the file.
+3. In **Settings → Things → + → Homematic IP Cloud**, add a **Homematic IP Access Point** bridge. Enter the 24-character SGTIN printed on the access point and the system PIN if configured. Leave the token empty for initial pairing.
+4. When the bridge requests confirmation, briefly press the system button on the access point. The pairing window lasts two minutes. The bridge saves the confirmed token in its configuration.
+5. When the bridge is **ONLINE**, start a scan under **Settings → Things → + → Homematic IP Cloud**. Add a device from the Inbox, open its **Channels** tab and link the channel you want to an Item.
 
-Beim HmIP-SWDM meldet `ch1_windowState` den Fensterzustand als `Contact` mit `OPEN` oder `CLOSED`. Die Standardansicht priorisiert Fensterzustand, Batteriewarnung und Nichterreichbarkeit. Diagnosekanäle sind als erweitert gekennzeichnet. Heizungs- und Schaltgruppen erscheinen beim Scan, wenn du an der Bridge **Gruppen suchen** aktivierst.
+For an HmIP-SWDM window contact, link `ch1_windowState` to a Contact Item. Open and close the window to confirm that the Item switches between `OPEN` and `CLOSED`.
 
-## Unterstützte Funktionen
+## Discovery and state updates
 
-| Bereich | Was openHAB lesen oder steuern kann |
-| --- | --- |
-| Fenster | Offen/geschlossen sowie der detaillierte Cloud-Zustand, sofern vom Gerät gemeldet. Ein gekipptes Fenster zählt als offen. |
-| Rollläden und Jalousien | Hoch, runter, Stopp und Zielposition in Prozent. Bei unterstützten Jalousien lässt sich die Lamellenposition separat einstellen. 0 % entspricht offen. |
-| Beleuchtung | Ein/Aus, Helligkeit und bei kompatiblen Signallichtern eine vordefinierte Farbpalette. |
-| Heizungsgruppen | Solltemperatur, Boost, Automatik/manuell und Auswahl eines vorhandenen Heizprofils. |
-| Sensorik und Diagnose | Weitere gemeldete Zahlen, Texte und Schaltzustände, etwa Batterie, Erreichbarkeit oder Messwerte. Generische Messwerte verwenden die Rohskala der Cloud. |
+The default scan lists end devices. To include heating or switching groups, enable **Discover Groups** on the bridge and scan again. Existing groups continue to receive updates when group discovery is switched off. You can also add a device or group manually using its cloud ID.
 
-Der genaue Funktionsumfang ergibt sich aus dem Gerät. Das Binding liest skalare Cloud-Felder dynamisch. Schreibbefehle sind für die oben aufgeführten Funktionen implementiert. Der erste Abgleich erfolgt über HTTPS, dann folgen WebSocket-Ereignisse sowie alle fünf Minuten ein vollständiger Abgleich.
+The bridge reads an initial snapshot over HTTPS, receives changes over a WebSocket connection and refreshes the full snapshot every five minutes.
 
-## Aktualisieren und Fehler beheben
+## Channels
 
-- **Update einer vorhandenen Installation:** Bewahre die alte JAR außerhalb des Add-ons-Ordners auf und ersetze sie dort durch die neue. Erhalte die Dateirechte. Bridge und Things weiterverwenden. Die bestehenden Channel-IDs, etwa `ch1_windowState`, bleiben beim Wechsel von 0.1.0 erhalten. Starte nach dem Update einen Scan, um alte Inbox-Vorschläge zu aktualisieren.
-- **„Error reading bundle content“:** Prüfe, ob der openHAB-Benutzer die Datei tatsächlich lesen kann. Bei einem Container namens `openhab` zeigt `docker exec -u openhab openhab sh -c 'sha256sum /openhab/addons/org.openhab.binding.homematicipcloud-5.3.0-SNAPSHOT.jar'` sowohl Zugriffsprobleme als auch die Prüfsumme. Setze erforderliche Dateirechte oder Freigabe-ACLs am gemounteten Hostordner.
-- **Kopplung abgelaufen:** Deaktiviere die Bridge, aktiviere sie erneut und drücke die Taste, sobald die Aufforderung erscheint.
-- **Fehlender Channel oder Befehl:** Gib bei einem Fehlerbericht openHAB-Version, Modell, Binding-Version, Channel-ID und beobachtetes Verhalten an. Entferne Token, PIN, Seriennummern und persönliche Gerätekennungen aus Anhängen und Protokollen.
+The available channels depend on the capabilities reported by the entity. Device channel IDs use the functional channel index and cloud attribute name. Group channels use the prefix `group_`.
 
-## Lizenz und Protokollreferenzen
+| Capability | Item type | Operations |
+| --- | --- | --- |
+| Window state | Contact | OPEN or CLOSED. A tilted window maps to OPEN. The advanced detail channel carries the original state. |
+| Low battery, unreachable | Switch | Read-only warnings |
+| Shutter | Rollershutter | UP, DOWN, STOP and percentage position |
+| Blind slats | Dimmer | Percentage, preserving the reported shutter position |
+| Switch and dimmer | Switch, Dimmer | ON/OFF and brightness as supported |
+| Signal light | String, Dimmer | Preset colour and brightness |
+| Heating group | Number, Switch, String | Setpoint, boost, heating mode and available profiles |
+| Other reported scalar attributes | Number, Switch, String | Read-only raw cloud values |
 
-Das Projekt steht unter der Eclipse Public License 2.0. Die vorhandenen Protokollimplementierungen bieten Hintergrund zur Kommunikation mit der Homematic-IP-Cloud.
+Routing, radio, restart and device diagnostics are marked as advanced channels. Existing links, including links to advanced channels, retain their channel UIDs on upgrade.
 
-[LICENSE](LICENSE) · [ioBroker.hmip](https://github.com/iobroker-community-adapters/ioBroker.hmip) · [homematicip-rest-api](https://github.com/hahn-th/homematicip-rest-api)
+## File configuration
+
+For an already paired access point, supply the token in the bridge configuration. Replace the example serial, cloud ID and token with your own values.
+
+```java
+Bridge homematicipcloud:accesspoint:home "Access Point" [ sgtin="000000000000000000000001", token="YOUR_TOKEN", discoverGroups=false ] {
+    Thing device kitchen "Kitchen Window" [ cloudId="000000000000000000000002" ]
+}
+```
+
+```java
+Contact KitchenWindow "Kitchen Window" { channel="homematicipcloud:device:home:kitchen:ch1_windowState" }
+```
+
+## Upgrades and troubleshooting
+
+- **Upgrading from an earlier version.** Move the previous JAR outside the add-ons folder and copy the new one into place with the same read permissions. Keep the existing bridge, Things and Item links. Once the bridge is online, scan again to refresh the Inbox.
+- **“Error reading bundle content”.** Check read access from inside the container. For a container named `openhab`, run the command below on the Docker host. If it reports “Permission denied”, check permissions and share ACLs on the mounted host folder and JAR.
+- **Pairing timed out.** Disable and re-enable the bridge, then press the access point system button when prompted.
+- **Missing channel or command.** Include the device model, binding and openHAB versions, channel ID and observed behaviour in your issue. Remove tokens, PINs, serial numbers and personal device IDs from logs and screenshots.
+
+```sh
+docker exec -u openhab openhab sha256sum /openhab/addons/org.openhab.binding.homematicipcloud-5.3.0-SNAPSHOT.jar
+```
+
+## Licence and protocol references
+
+This project is licensed under the Eclipse Public License 2.0. The ioBroker adapter and the Homematic IP REST API project document related cloud integrations.
+
+[Licence](LICENSE) · [ioBroker.hmip](https://github.com/iobroker-community-adapters/ioBroker.hmip) · [homematicip-rest-api](https://github.com/hahn-th/homematicip-rest-api)

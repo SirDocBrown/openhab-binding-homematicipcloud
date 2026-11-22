@@ -1,10 +1,10 @@
-# Entwicklung und Verifikation
+# Development and verification
 
-Das Repository enthält ein Maven-Modul für den openHAB-Add-ons-Reaktor. Der übergeordnete POM, die Compiler-Konfiguration, die Formatierung und die statischen Prüfungen stammen aus dem offiziellen Add-ons-Projekt. Die Release-JAR liegt zusätzlich in `dist/`. Ihr Dateiname folgt der Maven-Version des Reaktors. Der Release-Tag des Community-Projekts und die Prüfsumme identifizieren die konkrete Datei.
+The binding is a Maven module in the openHAB Add-ons reactor, which supplies the parent POM, compiler settings, formatting rules and static analysis. The JAR in `dist/` uses the reactor version in its filename. The community release tag and SHA-256 checksum identify the published binary.
 
-## Build im openHAB-Reaktor
+## Build in the openHAB Add-ons reactor
 
-Voraussetzungen sind Git, JDK 21 und beim ersten Build Internetzugang zum Laden der Maven- und npm-Abhängigkeiten. Die folgenden Schritte gehen von zwei benachbarten Checkouts aus.
+Install Git and JDK 21. The first build needs internet access for Maven and npm dependencies. From a common parent directory, check out both projects and copy the binding into the reactor.
 
 ```sh
 git clone https://github.com/SirDocBrown/openhab-binding-homematicipcloud.git
@@ -17,28 +17,27 @@ cp -R ../openhab-binding-homematicipcloud/src "$module/"
 cp ../openhab-binding-homematicipcloud/pom.xml ../openhab-binding-homematicipcloud/README.md "$module/"
 ```
 
-Trage in `bundles/pom.xml` unter `<modules>` neben dem vorhandenen Homematic-Binding das zusätzliche Modul ein.
+In `bundles/pom.xml`, add the following entry to `<modules>` alongside the existing Homematic binding.
 
 ```xml
 <module>org.openhab.binding.homematicipcloud</module>
 ```
 
-Starte im Wurzelverzeichnis von `openhab-addons` den Build.
+Run the build from the root of `openhab-addons`.
 
 ```sh
 ./mvnw -pl :org.openhab.binding.homematicipcloud -am verify
 ```
 
-Die JAR liegt anschließend in `bundles/org.openhab.binding.homematicipcloud/target/`. Die Tests verwenden synthetische Cloud-Antworten. Für die Tests werden keine Zugangsdaten benötigt.
+The JAR is written to `bundles/org.openhab.binding.homematicipcloud/target/`. The regression test uses synthetic cloud responses and can run without credentials.
 
-## Prüfstand des veröffentlichten Builds
+## Verification of v0.2.1
 
-- Kompiliert mit Java 21 gegen den Add-ons-Reaktor 5.3.0-SNAPSHOT am oben genannten Commit.
-- Der JUnit-Test prüft Discovery-Filter, Migration bestehender Channel-IDs, Zustandsabbildung, Befehle und Kopplung. Ein isolierter openHAB-5.3.0.M5-Feature-Katalog diente zur abschließenden Karaf-Auflösungsprüfung mit Maven `verify`.
-- Checkstyle, PMD und SpotBugs wurden ausgeführt. Die Thing- und Add-on-Beschreibungen wurden zusätzlich lokal mit den offiziellen XML-Schemas validiert.
-- Der damalige ungeänderte Snapshot-Feature-Katalog enthielt widersprüchliche Karaf-Abhängigkeiten. Ein erneuter Snapshot-Build kann andere Abhängigkeiten auflösen. Für die M5-Prüfung wurde im Feature-Deskriptor nur die Repository-Referenz auf `mvn:org.openhab.distro/distro/5.3.0.M5/xml/features` umgestellt. Die Quellen der JAR waren identisch.
+The release was compiled with Java 21 against the 5.3.0-SNAPSHOT reactor at the commit shown above. The JUnit test covers discovery filters, migration of existing channel IDs, state mapping, commands and pairing. Checkstyle, PMD and SpotBugs ran during the build. The Thing and add-on descriptions were also validated against the official XML schemas.
 
-Die folgende Variante wiederholt die M5-Prüfung mit einem separaten Feature-Deskriptor. Sie setzt einen für Maven erreichbaren M5-Distributionskatalog und dessen Artefakte voraus. Der Maven-Compiler verwendet weiterhin die Versionen des Reaktors.
+At the time of the build, the snapshot feature catalogue contained conflicting Karaf dependencies. The successful Maven `verify` run used the openHAB 5.3.0.M5 distribution catalogue for the Karaf resolution check. Snapshot dependencies can change between builds.
+
+To repeat the M5 check, use a temporary feature descriptor. Maven must have access to the M5 catalogue and its artefacts. Compilation still uses the reactor dependencies.
 
 ```sh
 module=bundles/org.openhab.binding.homematicipcloud
@@ -48,15 +47,15 @@ sed 's#mvn:org.openhab.core.features.karaf/org.openhab.core.features.karaf.openh
 ./mvnw -pl :org.openhab.binding.homematicipcloud -Dfeature.directory="$descriptor" verify
 ```
 
-## Aufbau des Bindings
+## Source layout
 
-| Klasse | Aufgabe |
+| Class | Responsibility |
 | --- | --- |
-| `Factory` | Erzeugt Bridge- und Gerätehandler. |
-| `Cloud` | Kapselt HTTPS-Anfragen, Kopplung, Authentifizierung und WebSocket-Verbindung. |
-| `Access` | Verwaltet Verbindung, Wiederverbindung, Gerätebestand und Zustandsaktualisierung. |
-| `Discovery` | Meldet Endgeräte und optional Gruppen an die Inbox der jeweiligen Bridge. |
-| `Entity` | Erzeugt und aktualisiert die Channels eines Geräts oder einer Gruppe. |
-| `Points` | Übersetzt Cloud-Felder in Zustände und unterstützte Befehle. |
+| `Factory` | Creates bridge and device handlers. |
+| `Cloud` | Handles HTTPS requests, pairing, authentication and WebSocket connections. |
+| `Access` | Manages the connection, reconnection, device inventory and state updates. |
+| `Discovery` | Adds end devices and optional groups to the Inbox for their bridge. |
+| `Entity` | Creates and updates the channels of a device or group. |
+| `Points` | Maps cloud fields to states and supported commands. |
 
-Bei Erweiterungen sollte ein synthetisches Beispiel des Funktionskanals sowohl den gelesenen Zustand als auch gegebenenfalls die erzeugte Befehlsanfrage prüfen. Vorhandene Channel-IDs bleiben für bestehende Item-Links relevant.
+When adding a capability, include a synthetic functional-channel example that exercises the reported state and any outgoing command. Keep existing channel IDs stable so users retain their Item links.
