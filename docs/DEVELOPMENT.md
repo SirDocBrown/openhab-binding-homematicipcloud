@@ -4,7 +4,7 @@ The binding is a Maven module in the openHAB Add-ons reactor, which supplies the
 
 ## Build in the openHAB Add-ons reactor
 
-Install Git and JDK 21. The first build needs internet access for Maven and npm dependencies. From a common parent directory, check out both projects and copy the binding into the reactor.
+Install Git, Maven and JDK 21. The first build needs internet access for Maven and npm dependencies. From a common parent directory, check out both projects and copy the binding into the reactor.
 
 ```sh
 git clone https://github.com/SirDocBrown/openhab-binding-homematicipcloud.git
@@ -26,7 +26,7 @@ In `bundles/pom.xml`, add the following entry to `<modules>` alongside the exist
 Run the build from the root of `openhab-addons`.
 
 ```sh
-./mvnw -pl :org.openhab.binding.homematicipcloud spotless:check package
+mvn -pl :org.openhab.binding.homematicipcloud spotless:check package
 ```
 
 The JAR is written to `bundles/org.openhab.binding.homematicipcloud/target/`. The regression test uses synthetic cloud responses and can run without credentials.
@@ -44,7 +44,7 @@ module=bundles/org.openhab.binding.homematicipcloud
 descriptor=$(mktemp)
 sed 's#mvn:org.openhab.core.features.karaf/org.openhab.core.features.karaf.openhab-core/${ohc.version}/xml/features#mvn:org.openhab.distro/distro/5.3.0.M5/xml/features#' \
     "$module/src/main/feature/feature.xml" > "$descriptor"
-./mvnw -pl :org.openhab.binding.homematicipcloud -Dfeature.directory="$descriptor" verify
+mvn -pl :org.openhab.binding.homematicipcloud -Dfeature.directory="$descriptor" verify
 ```
 
 ## Source layout

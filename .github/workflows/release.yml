@@ -40,7 +40,7 @@ jobs:
           sed -i '/<module>org.openhab.binding.homematic<\/module>/a\    <module>org.openhab.binding.homematicipcloud</module>' reactor/bundles/pom.xml
       - name: Check formatting, run tests and package
         working-directory: reactor
-        run: ./mvnw --batch-mode -pl :org.openhab.binding.homematicipcloud spotless:check package
+        run: mvn --batch-mode -pl :org.openhab.binding.homematicipcloud spotless:check package
       - name: Prepare release files
         run: |
           set -eu
