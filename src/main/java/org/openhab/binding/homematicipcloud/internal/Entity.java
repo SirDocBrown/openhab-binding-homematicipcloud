@@ -66,18 +66,26 @@ final class Entity extends BaseThingHandler {
                 cloudId == null ? getThing().getUID().getId() : cloudId.toString());
     }
 
+    @Override
     public void initialize() {
-        updateStatus(ThingStatus.UNKNOWN);
         Access bridge = access();
         if (bridge != null) {
+            updateStatus(ThingStatus.UNKNOWN);
             bridge.refreshChild(this);
+        } else {
+            bridgeOffline();
         }
+    }
+
+    void bridgeOffline() {
+        points = Map.of();
+        updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.BRIDGE_OFFLINE);
     }
 
     static String item(String kind) {
         return switch (kind) {
             case "flag", "power", "boost" -> "Switch";
-            case "target", "profile", "number" -> "Number";
+            case "target", "number" -> "Number";
             case "dimmer", "slats", "paletteDim" -> "Dimmer";
             case "roller" -> "Rollershutter";
             case "window" -> "Contact";
@@ -103,7 +111,7 @@ final class Entity extends BaseThingHandler {
     void accept(@Nullable JsonObject data) {
         if (data == null) {
             points = Map.of();
-            updateStatus(ThingStatusDetail.COMMUNICATION_ERROR, "@text/offline.missing-entity");
+            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR, "@text/offline.missing-entity");
             return;
         }
         var mapped = Points.read(data, key().group());
@@ -122,7 +130,11 @@ final class Entity extends BaseThingHandler {
         }
         boolean unreachable = mapped.values().stream()
                 .anyMatch(p -> "unreach".equals(p.field()) && p.value().getAsBoolean());
-        updateStatus(unreachable ? ThingStatus.OFFLINE : ThingStatus.ONLINE);
+        if (unreachable) {
+            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR, "@text/offline.unreachable");
+        } else {
+            updateStatus(ThingStatus.ONLINE);
+        }
     }
 
     static List<Channel> channels(Thing thing, Map<String, Points.Point> mapped) {
@@ -132,8 +144,9 @@ final class Entity extends BaseThingHandler {
             ChannelTypeUID type = point.channelType();
             Channel existing = thing.getChannel(point.id());
             String label = point.priority() < 3 ? null
-                    : (point.index() < 0 ? "" : "K" + point.index() + " · ") + point.field();
+                    : (point.index() < 0 ? "" : "Ch" + point.index() + " · ") + point.field();
             if (existing != null && type.equals(existing.getChannelTypeUID())
+                    && item(point.kind()).equals(existing.getAcceptedItemType())
                     && Objects.equals(label, existing.getLabel())) {
                 channels.add(existing);
             } else {
@@ -166,6 +179,7 @@ final class Entity extends BaseThingHandler {
         }
     }
 
+    @Override
     public void handleCommand(ChannelUID uid, Command command) {
         Points.Point p = points.get(uid.getId());
         if (p == null) {
@@ -177,7 +191,7 @@ final class Entity extends BaseThingHandler {
         }
         Access parent = access();
         if (parent != null && getThing().getStatus() == ThingStatus.ONLINE) {
-            parent.command(this, uid.getId(), command.toString());
+            parent.command(this, uid.getId(), command);
         }
     }
 }

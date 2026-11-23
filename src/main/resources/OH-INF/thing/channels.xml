@@ -104,16 +104,40 @@
 	<channel-type id="mode">
 		<item-type>String</item-type>
 		<label>Heating Mode</label>
-		<state readOnly="false"/>
+		<state>
+			<options>
+				<option value="AUTOMATIC">Automatic</option>
+				<option value="MANUAL">Manual</option>
+				<option value="ECO">Eco</option>
+			</options>
+		</state>
+		<command>
+			<options>
+				<option value="AUTOMATIC">Automatic</option>
+				<option value="MANUAL">Manual</option>
+			</options>
+		</command>
 	</channel-type>
 	<channel-type id="profile">
-		<item-type>Number</item-type>
+		<item-type>String</item-type>
 		<label>Heating Profile</label>
 		<state readOnly="false"/>
 	</channel-type>
 	<channel-type id="palette">
 		<item-type>String</item-type>
 		<label>Signal Colour</label>
+		<state>
+			<options>
+				<option value="BLACK">Black</option>
+				<option value="BLUE">Blue</option>
+				<option value="GREEN">Green</option>
+				<option value="TURQUOISE">Turquoise</option>
+				<option value="RED">Red</option>
+				<option value="PURPLE">Purple</option>
+				<option value="YELLOW">Yellow</option>
+				<option value="WHITE">White</option>
+			</options>
+		</state>
 	</channel-type>
 	<channel-type id="paletteDim">
 		<item-type>Dimmer</item-type>

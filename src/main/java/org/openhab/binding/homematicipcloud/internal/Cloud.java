@@ -47,6 +47,7 @@ final class Cloud implements AutoCloseable {
     }
 
     private final HttpClient http;
+    private static final String APPLICATION_VERSION = "0.2.1";
     private final Transport transport;
     private final String serial;
     private final String clientAuth;
@@ -75,7 +76,7 @@ final class Cloud implements AutoCloseable {
         JsonObject client = new JsonObject();
         client.addProperty("apiVersion", "10");
         client.addProperty("applicationIdentifier", "openHAB");
-        client.addProperty("applicationVersion", "0.2.0");
+        client.addProperty("applicationVersion", APPLICATION_VERSION);
         client.addProperty("deviceManufacturer", "openHAB");
         client.addProperty("deviceType", "Computer");
         client.addProperty("language", "de_DE");
@@ -195,6 +196,7 @@ final class Cloud implements AutoCloseable {
                 .buildAsync(java.util.Objects.requireNonNull(events, "Cloud lookup required"), listener).join();
     }
 
+    @Override
     public void close() {
         http.shutdownNow();
     }

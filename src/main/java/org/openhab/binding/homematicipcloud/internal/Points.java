@@ -17,8 +17,19 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
+import javax.measure.Unit;
+
 import org.eclipse.jdt.annotation.NonNullByDefault;
+import org.openhab.core.library.types.DecimalType;
+import org.openhab.core.library.types.OnOffType;
+import org.openhab.core.library.types.QuantityType;
+import org.openhab.core.library.types.StopMoveType;
+import org.openhab.core.library.types.StringType;
+import org.openhab.core.library.types.UpDownType;
+import org.openhab.core.library.unit.SIUnits;
+import org.openhab.core.library.unit.Units;
 import org.openhab.core.thing.type.ChannelTypeUID;
+import org.openhab.core.types.Command;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
@@ -150,7 +161,7 @@ final class Points {
         }
     }
 
-    static Request command(String entityId, Point p, String command) {
+    static Request command(String entityId, Point p, Command command) {
         boolean group = p.index < 0;
         JsonObject data = new JsonObject();
         data.addProperty(group ? "groupId" : "deviceId", entityId);
@@ -160,33 +171,21 @@ final class Points {
         String endpoint;
         switch (p.kind) {
             case "power", "boost" -> {
-                if (!Set.of("ON", "OFF").contains(command)) {
+                if (!(command instanceof OnOffType)) {
                     throw new IllegalArgumentException("ON/OFF erwartet");
                 }
                 boolean boost = "boost".equals(p.kind);
-                data.addProperty(boost ? "boost" : "on", "ON".equals(command));
+                data.addProperty(boost ? "boost" : "on", command == OnOffType.ON);
                 endpoint = boost ? "group/heating/setBoost"
                         : group ? "group/switching/setState" : "device/control/setSwitchState";
             }
             case "roller", "slats", "dimmer" -> {
                 String prefix = group ? "group/switching/" : "device/control/";
-                if ("roller".equals(p.kind) && "STOP".equals(command)) {
+                if ("roller".equals(p.kind) && command == StopMoveType.STOP) {
                     return new Request(prefix + "stop", data);
                 }
-                String level = switch (p.kind) {
-                    case "roller" -> switch (command) {
-                        case "UP" -> "0";
-                        case "DOWN" -> "100";
-                        default -> command;
-                    };
-                    case "dimmer" -> switch (command) {
-                        case "OFF" -> "0";
-                        case "ON" -> "100";
-                        default -> command;
-                    };
-                    default -> command;
-                };
-                data.addProperty(p.field, range(level, 0, 100).movePointLeft(2));
+                BigDecimal level = level(p.kind, command);
+                data.addProperty(p.field, level.movePointLeft(2));
                 if ("slats".equals(p.kind)) {
                     data.add("shutterLevel", p.siblings.get("shutterLevel"));
                 }
@@ -197,38 +196,35 @@ final class Points {
                 };
             }
             case "palette", "paletteDim" -> {
-                String color = "palette".equals(p.kind) ? command : p.siblings.get("simpleRGBColorState").getAsString();
+                String color = "palette".equals(p.kind) ? string(command)
+                        : p.siblings.get("simpleRGBColorState").getAsString();
                 if (!Set.of("BLACK", "BLUE", "GREEN", "TURQUOISE", "RED", "PURPLE", "YELLOW", "WHITE")
                         .contains(color)) {
                     throw new IllegalArgumentException("Unbekannte Lichtfarbe");
                 }
-                String level = switch (command) {
-                    case "ON" -> "100";
-                    case "OFF" -> "0";
-                    default -> command;
-                };
                 data.addProperty("simpleRGBColorState", color);
-                data.addProperty("dimLevel", "paletteDim".equals(p.kind) ? range(level, 0, 100).movePointLeft(2)
+                data.addProperty("dimLevel", "paletteDim".equals(p.kind) ? level("dimmer", command).movePointLeft(2)
                         : p.siblings.get("dimLevel").getAsBigDecimal());
                 endpoint = "device/control/setSimpleRGBColorDimLevel";
             }
             case "target" -> {
                 data.addProperty("setPointTemperature",
-                        range(command, Double.parseDouble(text(p.siblings, "minTemperature", "5")),
+                        range(number(command, SIUnits.CELSIUS),
+                                Double.parseDouble(text(p.siblings, "minTemperature", "5")),
                                 Double.parseDouble(text(p.siblings, "maxTemperature", "30"))));
                 endpoint = "group/heating/setSetPointTemperature";
             }
             case "mode" -> {
-                if (!Set.of("AUTOMATIC", "MANUAL").contains(command)) {
+                String mode = string(command);
+                if (!Set.of("AUTOMATIC", "MANUAL").contains(mode)) {
                     throw new IllegalArgumentException("Ungültiger Modus");
                 }
-                data.addProperty("controlMode", command);
+                data.addProperty("controlMode", mode);
                 endpoint = "group/heating/setControlMode";
             }
             case "profile" -> {
-                int profile = new BigDecimal(command).intValueExact();
-                if (!(p.siblings.get("profiles") instanceof JsonObject profiles)
-                        || !profiles.has(Integer.toString(profile))) {
+                String profile = string(command);
+                if (!(p.siblings.get("profiles") instanceof JsonObject profiles) || !profiles.has(profile)) {
                     throw new IllegalArgumentException("Profil nicht vorhanden");
                 }
                 data.addProperty("profileIndex", profile);
@@ -239,8 +235,36 @@ final class Points {
         return new Request(endpoint, data);
     }
 
-    private static BigDecimal range(String value, double min, double max) {
-        var number = new BigDecimal(value);
+    private static String string(Command command) {
+        if (command instanceof StringType value) {
+            return value.toString();
+        }
+        throw new IllegalArgumentException("Expected a string command");
+    }
+
+    private static BigDecimal number(Command command, Unit<?> unit) {
+        if (command instanceof QuantityType<?> quantity) {
+            var converted = quantity.toUnit(unit);
+            if (converted != null) {
+                return converted.toBigDecimal();
+            }
+        } else if (command instanceof DecimalType decimal) {
+            return decimal.toBigDecimal();
+        }
+        throw new IllegalArgumentException("Expected a number in " + unit);
+    }
+
+    private static BigDecimal level(String kind, Command command) {
+        if ("roller".equals(kind) && command instanceof UpDownType direction) {
+            return direction == UpDownType.UP ? BigDecimal.ZERO : BigDecimal.valueOf(100);
+        }
+        if ("dimmer".equals(kind) && command instanceof OnOffType power) {
+            return power == OnOffType.ON ? BigDecimal.valueOf(100) : BigDecimal.ZERO;
+        }
+        return range(number(command, Units.PERCENT), 0, 100);
+    }
+
+    private static BigDecimal range(BigDecimal number, double min, double max) {
         if (number.compareTo(BigDecimal.valueOf(min)) < 0 || number.compareTo(BigDecimal.valueOf(max)) > 0) {
             throw new IllegalArgumentException("Wert außerhalb des Bereichs");
         }

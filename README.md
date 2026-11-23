@@ -2,7 +2,7 @@
 
 Connect Homematic IP devices to openHAB through an internet-connected access point and the Homematic IP cloud. Devices appear as openHAB Things. For example, a window contact can trigger a heating rule, and a Rollershutter Item can control a blind.
 
-**Compatibility.** Release v0.2.1 was built with Java 21 and verified against the openHAB 5.3.0.M5 Karaf feature catalogue. Pairing and window-state updates were confirmed on an HmIP-HAP2 with an HmIP-SWDM contact using an earlier binding version. The binding uses an unofficial cloud interface. Available channels depend on the capabilities reported by each device.
+**Compatibility.** The minimum target for builds from the current source is openHAB **5.0.0** with Java 21. Tagged builds use the 5.0.0 Add-ons reactor. The bridge uses the explicit status/detail API, and the bridge-scoped discovery cleanup overload is present in [openHAB Core 5.0.0](https://github.com/openhab/openhab-core/blob/5.0.0/bundles/org.openhab.core.config.discovery/src/main/java/org/openhab/core/config/discovery/AbstractDiscoveryService.java). Release v0.2.1 was built with Java 21 and verified against the openHAB 5.3.0.M5 Karaf feature catalogue. Pairing and window-state updates were confirmed on an HmIP-HAP2 with an HmIP-SWDM contact using an earlier binding version. The binding uses an unofficial cloud interface. Available channels depend on the capabilities reported by each device.
 
 [Download the v0.2.1 JAR](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases/download/v0.2.1/org.openhab.binding.homematicipcloud-5.3.0-SNAPSHOT.jar) · [Release notes and checksum](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases/tag/v0.2.1) · [Build and tests](docs/DEVELOPMENT.md)
 
@@ -38,6 +38,12 @@ The available channels depend on the capabilities reported by the entity. Device
 | Other reported scalar attributes | Number, Switch, String | Read-only raw cloud values |
 
 Routing, radio, restart and device diagnostics are marked as advanced channels. Existing links, including links to advanced channels, retain their channel UIDs on upgrade.
+
+## Heating groups
+
+Link `group_activeProfile` to a **String** Item. Send a profile key reported by that group, such as `PROFILE_1`. If you previously linked a Number Item, replace it with a String Item and relink the same channel ID. Profile availability depends on the group.
+
+The heating mode channel reports `AUTOMATIC`, `MANUAL` and `ECO`. The binding sends `AUTOMATIC` and `MANUAL` to the control-mode endpoint. ECO is displayed as reported by the cloud. Temperature commands accept compatible units and convert them to degrees Celsius.
 
 ## File configuration
 

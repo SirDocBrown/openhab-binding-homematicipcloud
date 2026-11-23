@@ -36,10 +36,12 @@ public final class Factory extends BaseThingHandlerFactory {
     static final ThingTypeUID DEVICE = new ThingTypeUID(ID, "device");
     static final ThingTypeUID GROUP = new ThingTypeUID(ID, "group");
 
+    @Override
     public boolean supportsThingType(ThingTypeUID type) {
         return ACCESS.equals(type) || DEVICE.equals(type) || GROUP.equals(type);
     }
 
+    @Override
     protected @Nullable ThingHandler createHandler(Thing thing) {
         if (ACCESS.equals(thing.getThingTypeUID()) && thing instanceof Bridge bridge) {
             return new Access(bridge);
