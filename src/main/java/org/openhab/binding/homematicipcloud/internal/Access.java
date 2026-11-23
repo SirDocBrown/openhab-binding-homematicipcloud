@@ -91,8 +91,11 @@ public final class Access extends BaseBridgeHandler {
             updateStatus(ThingStatus.UNKNOWN);
             current.worker.execute(current::tick);
         } catch (RuntimeException e) {
-            stopSession();
-            cloud.close();
+            if (session == null) {
+                cloud.close();
+            } else {
+                stopSession();
+            }
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR, e.getClass().getSimpleName());
         }
     }
@@ -237,7 +240,7 @@ public final class Access extends BaseBridgeHandler {
                     if (pending == null) {
                         pairing = cloud.startPairing(setting("pin"));
                         pairDeadline = System.currentTimeMillis() + 120_000;
-                        ifCurrent(() -> updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_PENDING,
+                        ifCurrent(() -> updateStatus(ThingStatus.ONLINE, ThingStatusDetail.CONFIGURATION_PENDING,
                                 "@text/offline.press-button"));
                     } else {
                         if (System.currentTimeMillis() > pairDeadline) {

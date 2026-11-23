@@ -147,6 +147,23 @@ class MappingTest {
     }
 
     @Test
+    void migratesExistingNumberProfileToStringWithSameChannelId() {
+        var thingId = new org.openhab.core.thing.ThingUID("homematicipcloud:group:bridge:heating");
+        var channelId = new org.openhab.core.thing.ChannelUID(thingId, "group_activeProfile");
+        var mapped = Points.read(parse("""
+                {"type":"HEATING","activeProfile":"PROFILE_1"}
+                """), true);
+        var profile = point(mapped, "group_activeProfile");
+        var old = org.openhab.core.thing.binding.builder.ChannelBuilder.create(channelId, "Number")
+                .withType(profile.channelType()).withLabel("activeProfile").build();
+        var thing = org.openhab.core.thing.binding.builder.ThingBuilder.create(Factory.GROUP, thingId).withChannel(old)
+                .build();
+        var migrated = Entity.channels(thing, mapped).getFirst();
+        assertEquals(channelId, migrated.getUID());
+        assertEquals("String", migrated.getAcceptedItemType());
+    }
+
+    @Test
     void signalLightsAndSwitchGroups() {
         var lamp = Points.read(
                 parse("""

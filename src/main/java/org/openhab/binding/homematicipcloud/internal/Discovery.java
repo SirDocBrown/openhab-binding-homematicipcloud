@@ -19,6 +19,7 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.openhab.core.config.discovery.AbstractThingHandlerDiscoveryService;
 import org.openhab.core.config.discovery.DiscoveryResultBuilder;
 import org.openhab.core.thing.ThingStatus;
+import org.openhab.core.thing.ThingStatusDetail;
 import org.openhab.core.thing.ThingUID;
 
 import com.google.gson.JsonObject;
@@ -45,7 +46,8 @@ public final class Discovery extends AbstractThingHandlerDiscoveryService<Access
     @Override
     protected void startScan() {
         Access access = thingHandler;
-        if (access.getThing().getStatus() != ThingStatus.ONLINE) {
+        if (access.getThing().getStatus() != ThingStatus.ONLINE
+                || access.getThing().getStatusInfo().getStatusDetail() == ThingStatusDetail.CONFIGURATION_PENDING) {
             return;
         }
         Instant started = Instant.now();
