@@ -2,13 +2,13 @@
 
 Connect Homematic IP devices to openHAB through an internet-connected access point and the Homematic IP cloud. Devices appear as openHAB Things. For example, a window contact can trigger a heating rule, and a Rollershutter Item can control a blind.
 
-**Compatibility.** The minimum target for builds from the current source is openHAB **5.0.0** with Java 21. Tagged builds use the 5.0.0 Add-ons reactor. The bridge uses the explicit status/detail API, and the bridge-scoped discovery cleanup overload is present in [openHAB Core 5.0.0](https://github.com/openhab/openhab-core/blob/5.0.0/bundles/org.openhab.core.config.discovery/src/main/java/org/openhab/core/config/discovery/AbstractDiscoveryService.java). Release v0.2.1 was built with Java 21 and verified against the openHAB 5.3.0.M5 Karaf feature catalogue. Pairing and window-state updates were confirmed on an HmIP-HAP2 with an HmIP-SWDM contact using an earlier binding version. The binding uses an unofficial cloud interface. Available channels depend on the capabilities reported by each device.
+**Compatibility.** openHAB 5.0.0 or newer, with Java 21. Available channels depend on what each device reports through the unofficial Homematic IP cloud interface.
 
-[Download the v0.2.1 JAR](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases/download/v0.2.1/org.openhab.binding.homematicipcloud-5.3.0-SNAPSHOT.jar) · [Release notes and checksum](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases/tag/v0.2.1) · [Build and tests](docs/DEVELOPMENT.md)
+[Download the latest release and SHA256SUMS](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases/latest) · [Build and tests](docs/DEVELOPMENT.md)
 
 ## Install and pair an access point
 
-1. Download the JAR. To verify it, download `SHA256SUMS` into the same folder and run `shasum -a 256 -c SHA256SUMS` on macOS or `sha256sum -c SHA256SUMS` on Linux.
+1. Download `org.openhab.binding.homematicipcloud-<version>.jar` from the release assets (for example, `org.openhab.binding.homematicipcloud-0.3.0.jar`). To verify it, download `SHA256SUMS` into the same folder and run `shasum -a 256 -c SHA256SUMS` on macOS or `sha256sum -c SHA256SUMS` on Linux.
 2. Copy the JAR into your openHAB add-ons folder. With Docker or QNAP Container Station, use the host folder mounted at `/openhab/addons`. The container user must be able to open the folder and read the file.
 3. In **Settings → Things → + → Homematic IP Cloud**, add a **Homematic IP Access Point** bridge. Enter the 24-character SGTIN printed on the access point and the system PIN if configured. Leave the token empty for initial pairing.
 4. When the bridge requests confirmation, briefly press the system button on the access point. The pairing window lasts two minutes. The bridge saves the confirmed token in its configuration.
@@ -61,13 +61,13 @@ Contact KitchenWindow "Kitchen Window" { channel="homematicipcloud:device:home:k
 
 ## Upgrades and troubleshooting
 
-- **Upgrading from an earlier version.** Move the previous JAR outside the add-ons folder and copy the new one into place with the same read permissions. Keep the existing bridge, Things and Item links. Once the bridge is online, scan again to refresh the Inbox.
+- **Upgrading from an earlier version.** Move the previous JAR outside the add-ons folder and copy the new one into place with the same read permissions. Keep the existing bridge and Things. If `group_activeProfile` was linked to a Number Item, replace that link with a String Item on the same channel. Once the bridge is online, scan again to refresh the Inbox.
 - **“Error reading bundle content”.** Check read access from inside the container. For a container named `openhab`, run the command below on the Docker host. If it reports “Permission denied”, check permissions and share ACLs on the mounted host folder and JAR.
 - **Pairing timed out.** Disable and re-enable the bridge, then press the access point system button when prompted.
 - **Missing channel or command.** Include the device model, binding and openHAB versions, channel ID and observed behaviour in your issue. Remove tokens, PINs, serial numbers and personal device IDs from logs and screenshots.
 
 ```sh
-docker exec -u openhab openhab sha256sum /openhab/addons/org.openhab.binding.homematicipcloud-5.3.0-SNAPSHOT.jar
+docker exec -u openhab openhab sha256sum /openhab/addons/org.openhab.binding.homematicipcloud-0.3.0.jar
 ```
 
 ## Licence and protocol references

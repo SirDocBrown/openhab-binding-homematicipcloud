@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.assets.outputs.tag }}
     steps:
       - name: Check out binding
         uses: actions/checkout@v4
@@ -41,13 +43,29 @@ jobs:
       - name: Check formatting, run tests and package
         working-directory: reactor
         run: mvn --batch-mode -pl :org.openhab.binding.homematicipcloud spotless:check package
-      - name: Prepare release files
+      - name: Verify release version and prepare files
+        id: assets
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -eu
+          binding=org.openhab.binding.homematicipcloud
+          version=$(python3 -c 'import xml.etree.ElementTree as ET; print(ET.parse("binding/pom.xml").findtext("{http://maven.apache.org/POM/4.0.0}version"))')
+          jar="reactor/bundles/$binding/target/$binding-$version.jar"
+          manifest_version=$(unzip -p "$jar" META-INF/MANIFEST.MF | tr -d '\r' | sed -n 's/^Bundle-Version: //p')
+          [[ "$manifest_version" == "$version" ]]
+          tag="v$version"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [[ "$COMMIT_MESSAGE" == 'Release v'* ]]; then
+            tag="${COMMIT_MESSAGE#Release }"
+          fi
+          [[ "$tag" == "v$version" ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           mkdir assets
-          cp reactor/bundles/org.openhab.binding.homematicipcloud/target/org.openhab.binding.homematicipcloud-5.0.0.jar assets/
+          cp "$jar" "assets/$binding-${tag#v}.jar"
           cd assets
-          sha256sum *.jar > SHA256SUMS
+          sha256sum *.jar | tee SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: binding
@@ -55,7 +73,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release v'))
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -68,9 +86,17 @@ jobs:
       - name: Publish tagged build
         working-directory: assets
         env:
+          TAG: ${{ needs.build.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           sha256sum -c SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "Homematic IP Cloud $GITHUB_REF_NAME" --generate-notes *.jar SHA256SUMS
+          if [[ "$GITHUB_REF_TYPE" == branch ]]; then
+            if ! sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha'); then
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA"
+            else
+              [[ "$sha" == "$GITHUB_SHA" ]]
+            fi
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Homematic IP Cloud $TAG" --generate-notes *.jar SHA256SUMS

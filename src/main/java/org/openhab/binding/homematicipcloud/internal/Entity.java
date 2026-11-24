@@ -31,6 +31,7 @@ import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
+import org.openhab.core.thing.ThingStatusInfo;
 import org.openhab.core.thing.binding.BaseThingHandler;
 import org.openhab.core.thing.binding.builder.ChannelBuilder;
 import org.openhab.core.thing.type.ChannelTypeUID;
@@ -71,6 +72,16 @@ final class Entity extends BaseThingHandler {
         Access bridge = access();
         if (bridge != null) {
             updateStatus(ThingStatus.UNKNOWN);
+            bridge.refreshChild(this);
+        } else {
+            bridgeOffline();
+        }
+    }
+
+    @Override
+    public void bridgeStatusChanged(ThingStatusInfo bridgeStatusInfo) {
+        Access bridge = access();
+        if (bridgeStatusInfo.getStatus() == ThingStatus.ONLINE && bridge != null) {
             bridge.refreshChild(this);
         } else {
             bridgeOffline();

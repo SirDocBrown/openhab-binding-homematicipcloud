@@ -27,6 +27,7 @@ import java.util.UUID;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.osgi.framework.FrameworkUtil;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -47,7 +48,6 @@ final class Cloud implements AutoCloseable {
     }
 
     private final HttpClient http;
-    private static final String APPLICATION_VERSION = "0.2.1";
     private final Transport transport;
     private final String serial;
     private final String clientAuth;
@@ -76,7 +76,8 @@ final class Cloud implements AutoCloseable {
         JsonObject client = new JsonObject();
         client.addProperty("apiVersion", "10");
         client.addProperty("applicationIdentifier", "openHAB");
-        client.addProperty("applicationVersion", APPLICATION_VERSION);
+        var bundle = FrameworkUtil.getBundle(Cloud.class);
+        client.addProperty("applicationVersion", bundle == null ? "unknown" : bundle.getVersion().toString());
         client.addProperty("deviceManufacturer", "openHAB");
         client.addProperty("deviceType", "Computer");
         client.addProperty("language", "de_DE");

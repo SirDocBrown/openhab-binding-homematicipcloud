@@ -33,8 +33,12 @@ import org.openhab.core.library.types.QuantityType;
 import org.openhab.core.library.types.StopMoveType;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.library.types.UpDownType;
+import org.openhab.core.thing.ThingStatus;
+import org.openhab.core.thing.ThingStatusDetail;
 import org.openhab.core.thing.binding.ThingHandlerCallback;
 import org.openhab.core.thing.binding.builder.BridgeBuilder;
+import org.openhab.core.thing.binding.builder.ThingBuilder;
+import org.openhab.core.thing.binding.builder.ThingStatusInfoBuilder;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -230,6 +234,41 @@ class MappingTest {
         assertTrue(Access.applyEvent(parse("""
                 {"pushEventType":"DEVICE_CHANGED"}
                 """), inventory, changed));
+    }
+
+    @Test
+    void onlineBridgeRefreshesChildBeforeReportingStatus() {
+        var bridge = BridgeBuilder.create(Factory.ACCESS, "test")
+                .withConfiguration(new Configuration(Map.of("sgtin", "000000000000000000000001"))).build();
+        var worker = mock(ScheduledExecutorService.class);
+        var access = new Access(bridge, () -> worker, null);
+        bridge.setHandler(access);
+        var thing = ThingBuilder.create(Factory.DEVICE, "sensor").withBridge(bridge.getUID()).build();
+        var child = new Entity(thing);
+        var callback = mock(ThingHandlerCallback.class);
+        when(callback.getBridge(bridge.getUID())).thenReturn(bridge);
+        child.setCallback(callback);
+        access.setCallback(mock(ThingHandlerCallback.class));
+        access.initialize();
+        try {
+            clearInvocations(worker);
+            var offline = ThingStatusInfoBuilder.create(ThingStatus.OFFLINE, ThingStatusDetail.BRIDGE_OFFLINE).build();
+            child.bridgeStatusChanged(ThingStatusInfoBuilder.create(ThingStatus.OFFLINE).build());
+            verify(callback).statusUpdated(thing, offline);
+            verifyNoInteractions(worker);
+
+            for (var detail : List.of(ThingStatusDetail.CONFIGURATION_PENDING, ThingStatusDetail.NONE)) {
+                clearInvocations(worker, callback);
+                child.bridgeStatusChanged(ThingStatusInfoBuilder.create(ThingStatus.ONLINE, detail).build());
+                var refresh = ArgumentCaptor.forClass(Runnable.class);
+                verify(worker).execute(refresh.capture());
+                refresh.getValue().run();
+                verify(callback).statusUpdated(thing, offline);
+                verify(callback, times(1)).statusUpdated(eq(thing), any());
+            }
+        } finally {
+            access.dispose();
+        }
     }
 
     @Test

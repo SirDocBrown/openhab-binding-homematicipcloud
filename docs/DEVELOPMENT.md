@@ -31,21 +31,13 @@ mvn -pl :org.openhab.binding.homematicipcloud spotless:check package
 
 The JAR is written to `bundles/org.openhab.binding.homematicipcloud/target/`. The regression test uses synthetic cloud responses and can run without credentials.
 
-## Verification of v0.2.1
+## Versioning and release
 
-The release was compiled with Java 21 against the 5.3.0-SNAPSHOT reactor at commit `ef448827d9fff145b86d0662703871129cd4dfc8`. The JUnit test covers discovery filters, migration of existing channel IDs, state mapping, commands and pairing. Checkstyle, PMD and SpotBugs ran during the build. The Thing and add-on descriptions were also validated against the official XML schemas.
+Set the binding version in the module POM's own `<version>` element. Its parent version selects the openHAB reactor. Maven writes the binding version into the OSGi bundle manifest, and the cloud client reads it at runtime.
 
-At the time of the build, the snapshot feature catalogue contained conflicting Karaf dependencies. The successful Maven `verify` run used the openHAB 5.3.0.M5 distribution catalogue for the Karaf resolution check. Snapshot dependencies can change between builds.
+CI runs the command above on Java 21 against openHAB Add-ons 5.0.0. The JUnit suite covers pairing, bridge reconfiguration, child status during pairing, discovery, state mapping, commands and channel migration. Tests use synthetic data and require no Homematic credentials.
 
-To repeat the M5 check, use a temporary feature descriptor. Maven must have access to the M5 catalogue and its artefacts. Compilation still uses the reactor dependencies.
-
-```sh
-module=bundles/org.openhab.binding.homematicipcloud
-descriptor=$(mktemp)
-sed 's#mvn:org.openhab.core.features.karaf/org.openhab.core.features.karaf.openhab-core/${ohc.version}/xml/features#mvn:org.openhab.distro/distro/5.3.0.M5/xml/features#' \
-    "$module/src/main/feature/feature.xml" > "$descriptor"
-mvn -pl :org.openhab.binding.homematicipcloud -Dfeature.directory="$descriptor" verify
-```
+To release from `main`, use the exact commit message `Release v<version>`. After the build, tests and version checks succeed, CI tags that commit and publishes its verified assets. An existing tag pushed manually also runs the build and must match the module version. Download `org.openhab.binding.homematicipcloud-<version>.jar` and `SHA256SUMS` from the [latest release](https://github.com/SirDocBrown/openhab-binding-homematicipcloud/releases/latest).
 
 ## Source layout
 
