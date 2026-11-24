@@ -239,29 +239,39 @@ class MappingTest {
         var first = mock(ScheduledExecutorService.class);
         var second = mock(ScheduledExecutorService.class);
         var workers = List.of(first, second).iterator();
-        var access = new Access(bridge, workers::next);
+        var requests = new java.util.ArrayList<String>();
+        var access = new Access(bridge, workers::next, request -> {
+            String path = request.uri().getPath();
+            requests.add(path);
+            return switch (path) {
+                case "/getHost" -> new Cloud.Reply(200,
+                        "{\"urlREST\":\"https://test.homematic.com\",\"urlWebSocket\":\"wss://test.homematic.com\"}");
+                case "/hmip/auth/connectionRequest" -> new Cloud.Reply(200, "");
+                default -> throw new AssertionError(path);
+            };
+        });
         access.setCallback(mock(ThingHandlerCallback.class));
-        try (var clients = mockConstruction(Cloud.class)) {
-            access.initialize();
-            var before = ArgumentCaptor.forClass(Runnable.class);
-            verify(first).execute(before.capture());
-            access.dispose();
-            verify(first).shutdownNow();
-            var oldClient = clients.constructed().getFirst();
-            verify(oldClient).close();
+        access.initialize();
+        var before = ArgumentCaptor.forClass(Runnable.class);
+        verify(first).execute(before.capture());
+        before.getValue().run();
+        var expected = List.of("/getHost", "/hmip/auth/connectionRequest");
+        assertEquals(expected, requests);
+        access.dispose();
+        verify(first).shutdownNow();
 
-            access.initialize();
+        requests.clear();
+        access.initialize();
+        try {
             var after = ArgumentCaptor.forClass(Runnable.class);
             verify(second).execute(after.capture());
             before.getValue().run();
-            verify(oldClient, never()).lookup();
-            Cloud newClient = clients.constructed().getLast();
-            when(newClient.startPairing("")).thenReturn(new JsonObject());
+            assertTrue(requests.isEmpty());
             after.getValue().run();
-            verify(newClient).lookup();
-            verify(newClient).startPairing("");
+            assertEquals(expected, requests);
+        } finally {
             access.dispose();
-            verify(newClient).close();
         }
+        verify(second).shutdownNow();
     }
 }

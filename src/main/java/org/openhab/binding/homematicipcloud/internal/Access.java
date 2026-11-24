@@ -55,16 +55,18 @@ public final class Access extends BaseBridgeHandler {
     }
 
     private final Supplier<ScheduledExecutorService> workers;
+    private final Cloud.@Nullable Transport transport;
     private volatile @Nullable Session session;
 
     Access(Bridge bridge) {
         this(bridge, () -> ThreadPoolManager.getPoolBasedSequentialScheduledExecutorService(Factory.ID,
-                "homematicipcloud-bridge"));
+                "homematicipcloud-bridge"), null);
     }
 
-    Access(Bridge bridge, Supplier<ScheduledExecutorService> workers) {
+    Access(Bridge bridge, Supplier<ScheduledExecutorService> workers, Cloud.@Nullable Transport transport) {
         super(bridge);
         this.workers = workers;
+        this.transport = transport;
     }
 
     @Override
@@ -77,7 +79,7 @@ public final class Access extends BaseBridgeHandler {
         String token = setting("token");
         Cloud cloud;
         try {
-            cloud = new Cloud(setting("sgtin"), token);
+            cloud = new Cloud(setting("sgtin"), token, transport);
         } catch (IllegalArgumentException e) {
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR, "@text/offline.invalid-sgtin");
             return;
