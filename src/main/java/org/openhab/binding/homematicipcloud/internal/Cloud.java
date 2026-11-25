@@ -18,12 +18,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
+import java.net.http.WebSocketHandshakeException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.CompletionException;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
@@ -42,9 +47,16 @@ import com.google.gson.JsonParser;
 final class Cloud implements AutoCloseable {
     interface Transport {
         Reply send(HttpRequest request) throws Exception;
+
+        default WebSocket connect(WebSocket.Builder builder, URI endpoint, WebSocket.Listener listener) {
+            return builder.buildAsync(endpoint, listener).join();
+        }
     }
 
-    record Reply(int statusCode, String body) {
+    record Reply(int statusCode, String body, @Nullable String retryAfter) {
+        Reply(int statusCode, String body) {
+            this(statusCode, body, "");
+        }
     }
 
     private final HttpClient http;
@@ -69,7 +81,8 @@ final class Cloud implements AutoCloseable {
         http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
         transport = testTransport != null ? testTransport : request -> {
             var response = http.send(request, HttpResponse.BodyHandlers.ofString());
-            return new Reply(response.statusCode(), response.body());
+            return new Reply(response.statusCode(), response.body(),
+                    response.headers().firstValue("Retry-After").orElse(""));
         };
         byte[] bytes = (this.serial + "jiLpVitHvWnIGD1yo7MA").getBytes(StandardCharsets.UTF_8);
         clientAuth = HexFormat.of().withUpperCase().formatHex(MessageDigest.getInstance("SHA-512").digest(bytes));
@@ -92,9 +105,30 @@ final class Cloud implements AutoCloseable {
 
         final int code;
 
-        Status(int code) {
+        final String retryAfter;
+
+        Status(int code, @Nullable String retryAfter) {
             super("Cloud HTTP " + code);
             this.code = code;
+            this.retryAfter = retryAfter == null ? "" : retryAfter;
+        }
+
+        long retryAt(long now) {
+            long minimum = now + Duration.ofMinutes(15).toMillis();
+            try {
+                long seconds = Long.parseLong(retryAfter.strip());
+                return Math.max(minimum, Math.addExact(now, Math.multiplyExact(seconds, 1000)));
+            } catch (ArithmeticException e) {
+                return Long.MAX_VALUE;
+            } catch (NumberFormatException e) {
+                try {
+                    long date = ZonedDateTime.parse(retryAfter.strip(), DateTimeFormatter.RFC_1123_DATE_TIME)
+                            .toInstant().toEpochMilli();
+                    return Math.max(minimum, date);
+                } catch (DateTimeParseException ignored) {
+                    return minimum;
+                }
+            }
         }
     }
 
@@ -114,10 +148,10 @@ final class Cloud implements AutoCloseable {
         }
         var response = transport.send(request.build());
         if (uri.getPath().endsWith("/isRequestAcknowledged") && response.statusCode() != 200) {
-            throw new Status(response.statusCode());
+            throw new Status(response.statusCode(), response.retryAfter());
         }
         if (response.statusCode() / 100 != 2) {
-            throw new Status(response.statusCode());
+            throw new Status(response.statusCode(), response.retryAfter());
         }
         if (response.body().isBlank()) {
             return new JsonObject();
@@ -191,10 +225,19 @@ final class Cloud implements AutoCloseable {
         return token;
     }
 
-    WebSocket listen(WebSocket.Listener listener) {
-        return http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(8)).header("CLIENTAUTH", clientAuth)
-                .header("AUTHTOKEN", token)
-                .buildAsync(java.util.Objects.requireNonNull(events, "Cloud lookup required"), listener).join();
+    WebSocket listen(WebSocket.Listener listener) throws Status {
+        var builder = http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(8)).header("CLIENTAUTH", clientAuth)
+                .header("AUTHTOKEN", token);
+        try {
+            return transport.connect(builder, java.util.Objects.requireNonNull(events, "Cloud lookup required"),
+                    listener);
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof WebSocketHandshakeException handshake) {
+                var response = handshake.getResponse();
+                throw new Status(response.statusCode(), response.headers().firstValue("Retry-After").orElse(""));
+            }
+            throw e;
+        }
     }
 
     @Override

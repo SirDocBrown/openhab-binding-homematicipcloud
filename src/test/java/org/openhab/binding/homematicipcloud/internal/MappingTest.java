@@ -15,12 +15,20 @@ package org.openhab.binding.homematicipcloud.internal;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import java.net.http.HttpRequest;
+import java.net.http.WebSocket;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -226,14 +234,92 @@ class MappingTest {
     void buttonPressDoesNotRequestSnapshot() {
         var inventory = new HashMap<Access.Key, JsonObject>();
         var changed = new HashSet<Access.Key>();
-        assertFalse(Access.applyEvent(parse("""
+        Access.applyEvent(parse("""
                 {"pushEventType":"DEVICE_CHANNEL_EVENT","channelIndex":1}
-                """), inventory, changed));
+                """), inventory, changed);
         assertTrue(inventory.isEmpty());
         assertTrue(changed.isEmpty());
-        assertTrue(Access.applyEvent(parse("""
+        Access.applyEvent(parse("""
                 {"pushEventType":"DEVICE_CHANGED"}
-                """), inventory, changed));
+                """), inventory, changed);
+    }
+
+    @Test
+    void honoursRetryAfterWithFifteenMinuteMinimum() {
+        long now = 1_000;
+        assertEquals(901_000, new Cloud.Status(429, "").retryAt(now));
+        assertEquals(901_000, new Cloud.Status(429, "bad").retryAt(now));
+        assertEquals(901_000, new Cloud.Status(429, "30").retryAt(now));
+        assertEquals(1_801_000, new Cloud.Status(429, "1800").retryAt(now));
+        assertEquals(3_600_000, new Cloud.Status(429, "Thu, 01 Jan 1970 01:00:00 GMT").retryAt(now));
+    }
+
+    @Test
+    void readsOncePerConnectionAndDropsCommandsDuringThrottle() throws Exception {
+        var clock = new AtomicLong(1000);
+        var bridge = BridgeBuilder.create(Factory.ACCESS, "test")
+                .withConfiguration(new Configuration(Map.of("sgtin", "000000000000000000000001", "token", "test")))
+                .build();
+        var child = new Entity(ThingBuilder.create(Factory.DEVICE, "D").build());
+        var worker = mock(ScheduledExecutorService.class);
+        var tick = new AtomicReference<Runnable>();
+        doAnswer(call -> {
+            call.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(worker).execute(any(Runnable.class));
+        when(worker.schedule(any(Runnable.class), anyLong(), any(TimeUnit.class))).thenAnswer(call -> {
+            tick.set(call.getArgument(0));
+            return null;
+        });
+        var transport = mock(Cloud.Transport.class);
+        var socket = mock(WebSocket.class);
+        when(socket.sendPing(any())).thenReturn(CompletableFuture.completedFuture(socket));
+        var listener = new AtomicReference<WebSocket.Listener>();
+        when(transport.connect(any(), any(), any())).thenAnswer(call -> {
+            listener.set(call.getArgument(2));
+            return socket;
+        });
+        List<String> paths = new ArrayList<>();
+        when(transport.send(any())).thenAnswer(call -> {
+            String path = call.getArgument(0, HttpRequest.class).uri().getPath();
+            paths.add(path);
+            return switch (path) {
+                case "/getHost" -> new Cloud.Reply(200,
+                        "{\"urlREST\":\"https://test.homematic.com\",\"urlWebSocket\":\"wss://test.homematic.com\"}");
+                case "/hmip/home/getCurrentState" -> new Cloud.Reply(200,
+                        """
+                                {"devices":{"D":{"functionalChannels":{"1":{"functionalChannelType":"SWITCH_CHANNEL","on":true}}}}}
+                                """);
+                case "/hmip/device/control/setSwitchState" -> new Cloud.Reply(429, "", "1800");
+                default -> throw new AssertionError(path);
+            };
+        });
+        var access = new Access(bridge, () -> worker, transport, clock::get);
+        access.setCallback(mock(ThingHandlerCallback.class));
+        access.initialize();
+        try {
+            var initial = List.of("/getHost", "/hmip/home/getCurrentState");
+            assertEquals(initial, paths);
+            clock.addAndGet(600_000);
+            listener.get().onPong(socket, ByteBuffer.allocate(0));
+            listener.get().onText(socket, "{\"events\":{\"1\":{\"pushEventType\":\"DEVICE_CHANGED\"}}}", true);
+            tick.get().run();
+            assertEquals(initial, paths);
+            access.command(child, "ch1_on", OnOffType.OFF);
+            assertEquals(List.of("/getHost", "/hmip/home/getCurrentState", "/hmip/device/control/setSwitchState"),
+                    paths);
+            clock.addAndGet(1_799_999);
+            access.command(child, "ch1_on", OnOffType.ON);
+            tick.get().run();
+            assertEquals(3, paths.size());
+            verify(transport, times(1)).connect(any(), any(), any());
+            clock.incrementAndGet();
+            tick.get().run();
+            assertEquals(initial, paths.subList(3, paths.size()));
+            verify(transport, times(2)).connect(any(), any(), any());
+        } finally {
+            access.dispose();
+        }
     }
 
     @Test

@@ -26,6 +26,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
@@ -54,6 +55,9 @@ public final class Access extends BaseBridgeHandler {
     record Key(boolean group, String id) {
     }
 
+    private static final String RETRY_AT = "cloudRetryAt";
+    private final LongSupplier clock;
+    private volatile long blockedUntil;
     private final Supplier<ScheduledExecutorService> workers;
     private final Cloud.@Nullable Transport transport;
     private volatile @Nullable Session session;
@@ -64,7 +68,13 @@ public final class Access extends BaseBridgeHandler {
     }
 
     Access(Bridge bridge, Supplier<ScheduledExecutorService> workers, Cloud.@Nullable Transport transport) {
+        this(bridge, workers, transport, System::currentTimeMillis);
+    }
+
+    Access(Bridge bridge, Supplier<ScheduledExecutorService> workers, Cloud.@Nullable Transport transport,
+            LongSupplier clock) {
         super(bridge);
+        this.clock = clock;
         this.workers = workers;
         this.transport = transport;
     }
@@ -76,6 +86,12 @@ public final class Access extends BaseBridgeHandler {
 
     @Override
     public void initialize() {
+        try {
+            blockedUntil = Math.max(blockedUntil,
+                    Long.parseLong(getThing().getProperties().getOrDefault(RETRY_AT, "0")));
+        } catch (NumberFormatException ignored) {
+            // Ignore a malformed persisted deadline.
+        }
         String token = setting("token");
         Cloud cloud;
         try {
@@ -154,32 +170,32 @@ public final class Access extends BaseBridgeHandler {
         super.dispose();
     }
 
-    /** Applies an inventory event and returns whether the payload requires reconciliation. */
-    static boolean applyEvent(JsonObject e, Map<Key, JsonObject> fresh, Set<Key> changed) {
+    static void applyEvent(JsonObject e, Map<Key, JsonObject> fresh, Set<Key> changed) {
         String type = Points.text(e, "pushEventType", "");
         if ("DEVICE_CHANNEL_EVENT".equals(type)) {
-            return false;
+            return;
         }
         boolean group = type.startsWith("GROUP_");
         if (!group && !type.startsWith("DEVICE_")) {
-            return false;
+            return;
         }
         if (type.endsWith("_REMOVED")) {
             String id = Points.text(e, "id", "");
             if (id.isEmpty()) {
-                return true;
+                return;
             }
             Key key = new Key(group, id);
             fresh.remove(key);
             changed.add(key);
         } else if (e.get(group ? "group" : "device") instanceof JsonObject object) {
-            Key key = new Key(group, object.get("id").getAsString());
+            String id = Points.text(object, "id", "");
+            if (id.isEmpty()) {
+                return;
+            }
+            Key key = new Key(group, id);
             fresh.put(key, object);
             changed.add(key);
-        } else {
-            return true;
         }
-        return false;
     }
 
     // Each initialization owns its inventory, callbacks, timers, client and executor.
@@ -189,7 +205,7 @@ public final class Access extends BaseBridgeHandler {
         private final Cloud cloud;
         private volatile @Nullable WebSocket socket;
         private @Nullable JsonObject pairing;
-        private long pairDeadline, nextSnapshot, nextPing, earliestEventSnapshot;
+        private long pairDeadline, nextPing, reconnectAfter;
         private volatile long lastSignal;
         private boolean located, authenticated, connected;
         private int failures;
@@ -231,6 +247,15 @@ public final class Access extends BaseBridgeHandler {
             if (!this.equals(session)) {
                 return;
             }
+            long remaining = Math.max(blockedUntil, reconnectAfter) - clock.getAsLong();
+            if (remaining > 0) {
+                if (blockedUntil > clock.getAsLong()) {
+                    ifCurrent(() -> updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR,
+                            "@text/offline.throttled"));
+                }
+                ifCurrent(() -> worker.schedule(this::tick, remaining, TimeUnit.MILLISECONDS));
+                return;
+            }
             int delay = 5;
             try {
                 if (!located) {
@@ -241,11 +266,11 @@ public final class Access extends BaseBridgeHandler {
                     JsonObject pending = pairing;
                     if (pending == null) {
                         pairing = cloud.startPairing(setting("pin"));
-                        pairDeadline = System.currentTimeMillis() + 120_000;
+                        pairDeadline = clock.getAsLong() + 120_000;
                         ifCurrent(() -> updateStatus(ThingStatus.ONLINE, ThingStatusDetail.CONFIGURATION_PENDING,
                                 "@text/offline.press-button"));
                     } else {
-                        if (System.currentTimeMillis() > pairDeadline) {
+                        if (clock.getAsLong() > pairDeadline) {
                             ifCurrent(() -> updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.CONFIGURATION_ERROR,
                                     "@text/offline.pairing-expired"));
                             return;
@@ -271,17 +296,12 @@ public final class Access extends BaseBridgeHandler {
                             }
                             socket = active;
                         }
-                        nextSnapshot = 0;
-                        lastSignal = System.currentTimeMillis();
+                        lastSignal = clock.getAsLong();
                         nextPing = lastSignal + 40_000;
-                    }
-                    long now = System.currentTimeMillis();
-                    if (now >= nextSnapshot) {
                         replace(cloud.snapshot());
-                        earliestEventSnapshot = System.currentTimeMillis() + 30_000;
-                        nextSnapshot = now + 300_000;
                         ifCurrent(() -> updateStatus(ThingStatus.ONLINE));
                     }
+                    long now = clock.getAsLong();
                     if (now - lastSignal > 100_000) {
                         throw new java.io.IOException("WebSocket-Timeout");
                     }
@@ -301,7 +321,11 @@ public final class Access extends BaseBridgeHandler {
                             status.getMessage()));
                     return;
                 }
-                delay = retryDelay(status.getMessage());
+                if (status.code == 429) {
+                    throttle(status);
+                } else {
+                    delay = retryDelay(status.getMessage());
+                }
             } catch (Exception e) {
                 if (!this.equals(session)) {
                     return;
@@ -316,6 +340,16 @@ public final class Access extends BaseBridgeHandler {
             disconnected();
             ifCurrent(() -> updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR, message));
             return Math.min(300, 5 << Math.min(++failures, 6));
+        }
+
+        private void throttle(Cloud.Status error) {
+            ifCurrent(() -> {
+                blockedUntil = error.retryAt(clock.getAsLong());
+                pairing = null;
+                disconnected();
+                updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR, "@text/offline.throttled");
+                updateProperty(RETRY_AT, Long.toString(blockedUntil));
+            });
         }
 
         private void disconnected() {
@@ -361,15 +395,13 @@ public final class Access extends BaseBridgeHandler {
             try {
                 JsonObject list = JsonParser.parseString(json).getAsJsonObject().getAsJsonObject("events");
                 if (list == null) {
-                    requestSnapshot();
                     return;
                 }
                 var fresh = new HashMap<>(entities);
                 Set<Key> changed = new HashSet<>();
                 for (var entry : list.entrySet()) {
-                    JsonObject e = entry.getValue().getAsJsonObject();
-                    if (applyEvent(e, fresh, changed)) {
-                        requestSnapshot();
+                    if (entry.getValue() instanceof JsonObject e) {
+                        applyEvent(e, fresh, changed);
                     }
                 }
                 if (changed.isEmpty()) {
@@ -382,16 +414,19 @@ public final class Access extends BaseBridgeHandler {
                     }
                 }
             } catch (RuntimeException e) {
-                requestSnapshot();
+                LoggerFactory.getLogger(Access.class).debug("Ignoring malformed cloud event");
             }
         }
 
-        private void requestSnapshot() {
-            nextSnapshot = Math.min(nextSnapshot, Math.max(System.currentTimeMillis(), earliestEventSnapshot));
-        }
-
         void command(Entity sender, String id, Command value) {
+            WebSocket source = socket;
+            if (source == null || clock.getAsLong() < blockedUntil) {
+                return;
+            }
             submit(() -> {
+                if (!source.equals(socket)) {
+                    return;
+                }
                 var key = sender.key();
                 var entity = entities.get(key);
                 if (!connected || entity == null) {
@@ -406,6 +441,12 @@ public final class Access extends BaseBridgeHandler {
                     cloud.call(request.path(), request.data());
                 } catch (IllegalArgumentException e) {
                     LoggerFactory.getLogger(Access.class).debug("Ignoring invalid command {} for {}", value, id);
+                } catch (Cloud.Status e) {
+                    if (e.code == 429) {
+                        throttle(e);
+                    } else {
+                        LoggerFactory.getLogger(Access.class).warn("Command for {} rejected (HTTP {})", id, e.code);
+                    }
                 } catch (Exception e) {
                     LoggerFactory.getLogger(Access.class).warn("Command for {} rejected ({})", id,
                             e.getClass().getSimpleName());
@@ -420,7 +461,7 @@ public final class Access extends BaseBridgeHandler {
 
             @Override
             public @Nullable CompletionStage<?> onText(WebSocket ws, CharSequence part, boolean last) {
-                lastSignal = System.currentTimeMillis();
+                lastSignal = clock.getAsLong();
                 text.append(part);
                 if (last) {
                     String message = text.toString();
@@ -433,7 +474,7 @@ public final class Access extends BaseBridgeHandler {
 
             @Override
             public @Nullable CompletionStage<?> onBinary(WebSocket ws, ByteBuffer data, boolean last) {
-                lastSignal = System.currentTimeMillis();
+                lastSignal = clock.getAsLong();
                 byte[] chunk = new byte[data.remaining()];
                 data.get(chunk);
                 binary.writeBytes(chunk);
@@ -448,7 +489,7 @@ public final class Access extends BaseBridgeHandler {
 
             @Override
             public @Nullable CompletionStage<?> onPong(WebSocket ws, ByteBuffer data) {
-                lastSignal = System.currentTimeMillis();
+                lastSignal = clock.getAsLong();
                 ws.request(1);
                 return null;
             }
@@ -467,6 +508,7 @@ public final class Access extends BaseBridgeHandler {
             private void lost(WebSocket ws) {
                 submit(() -> {
                     if (ws.equals(socket)) {
+                        reconnectAfter = clock.getAsLong() + 60_000;
                         disconnected();
                         ifCurrent(() -> updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.COMMUNICATION_ERROR,
                                 "@text/offline.disconnected"));
