@@ -18,6 +18,7 @@ import static org.mockito.Mockito.*;
 import java.net.http.HttpRequest;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -41,6 +42,7 @@ import org.openhab.core.library.types.QuantityType;
 import org.openhab.core.library.types.StopMoveType;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.library.types.UpDownType;
+import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
 import org.openhab.core.thing.binding.ThingHandlerCallback;
@@ -255,12 +257,56 @@ class MappingTest {
     }
 
     @Test
-    void readsOncePerConnectionAndDropsCommandsDuringThrottle() throws Exception {
+    void capsCloudAndPersistedDeadlines() {
+        long now = 1000;
+        long cap = now + TimeUnit.HOURS.toMillis(6);
+        assertEquals(cap, new Cloud.Status(429, "999999999999999").retryAt(now));
+        assertEquals(cap, new Cloud.Status(429, "Fri, 01 Jan 2100 00:00:00 GMT").retryAt(now));
+        assertEquals(cap, Access.persistedDeadline(Long.toString(Long.MAX_VALUE), now));
+        assertEquals(cap, Access.persistedDeadline("2100-01-01T00:00:00Z", now));
+        assertEquals(2000, Access.persistedDeadline("2000", now));
+        assertEquals(2000, Access.persistedDeadline("1970-01-01T00:00:02Z", now));
+        assertEquals(0, Access.persistedDeadline("999", now));
+    }
+
+    @Test
+    void normalizesLegacyDeadlineOnlyOnceAcrossRestarts() {
+        var clock = new AtomicLong(1000);
+        var bridge = BridgeBuilder.create(Factory.ACCESS, "test")
+                .withConfiguration(new Configuration(Map.of("sgtin", "000000000000000000000001", "token", "test")))
+                .withProperties(Map.of("cloudRetryAt", Long.toString(Long.MAX_VALUE))).build();
+        var worker = mock(ScheduledExecutorService.class);
+        var transport = mock(Cloud.Transport.class);
+        var access = new Access(bridge, () -> worker, transport, clock::get, () -> TimeUnit.HOURS.toMillis(6));
+        access.setCallback(mock(ThingHandlerCallback.class));
+        access.initialize();
+        try {
+            var deadline = Instant.ofEpochMilli(clock.get() + TimeUnit.HOURS.toMillis(6)).toString();
+            assertEquals(deadline, access.getThing().getProperties().get("cloudRetryAt"));
+            access.dispose();
+            clock.addAndGet(TimeUnit.HOURS.toMillis(1));
+            access.initialize();
+            assertEquals(deadline, access.getThing().getProperties().get("cloudRetryAt"));
+            var pending = ArgumentCaptor.forClass(Runnable.class);
+            verify(worker, times(2)).execute(pending.capture());
+            pending.getValue().run();
+            verify(worker).schedule(any(Runnable.class), eq(TimeUnit.HOURS.toMillis(5)), eq(TimeUnit.MILLISECONDS));
+            verifyNoInteractions(transport);
+        } finally {
+            access.dispose();
+        }
+    }
+
+    @Test
+    void resyncsOnScheduleAndRestoresRejectedCommands() throws Exception {
         var clock = new AtomicLong(1000);
         var bridge = BridgeBuilder.create(Factory.ACCESS, "test")
                 .withConfiguration(new Configuration(Map.of("sgtin", "000000000000000000000001", "token", "test")))
                 .build();
-        var child = new Entity(ThingBuilder.create(Factory.DEVICE, "D").build());
+        var child = new Entity(ThingBuilder.create(Factory.DEVICE, "D").withBridge(bridge.getUID()).build());
+        var childCallback = mock(ThingHandlerCallback.class);
+        child.setCallback(childCallback);
+        when(childCallback.getBridge(bridge.getUID())).thenReturn(bridge);
         var worker = mock(ScheduledExecutorService.class);
         var tick = new AtomicReference<Runnable>();
         doAnswer(call -> {
@@ -294,28 +340,55 @@ class MappingTest {
                 default -> throw new AssertionError(path);
             };
         });
-        var access = new Access(bridge, () -> worker, transport, clock::get);
+        var access = new Access(bridge, () -> worker, transport, clock::get, () -> TimeUnit.HOURS.toMillis(6));
+        bridge.setHandler(access);
         access.setCallback(mock(ThingHandlerCallback.class));
         access.initialize();
         try {
             var initial = List.of("/getHost", "/hmip/home/getCurrentState");
             assertEquals(initial, paths);
-            clock.addAndGet(600_000);
+            clock.addAndGet(TimeUnit.HOURS.toMillis(6) - 1);
             listener.get().onPong(socket, ByteBuffer.allocate(0));
-            listener.get().onText(socket, "{\"events\":{\"1\":{\"pushEventType\":\"DEVICE_CHANGED\"}}}", true);
             tick.get().run();
             assertEquals(initial, paths);
-            access.command(child, "ch1_on", OnOffType.OFF);
-            assertEquals(List.of("/getHost", "/hmip/home/getCurrentState", "/hmip/device/control/setSwitchState"),
-                    paths);
-            clock.addAndGet(1_799_999);
-            access.command(child, "ch1_on", OnOffType.ON);
+            clock.incrementAndGet();
             tick.get().run();
-            assertEquals(3, paths.size());
+            tick.get().run();
+            assertEquals(List.of("/hmip/home/getCurrentState"), paths.subList(2, paths.size()));
+            paths.clear();
+
+            listener.get().onText(socket, "{", true);
+            listener.get().onText(socket, "{\"events\":{\"1\":{\"pushEventType\":\"DEVICE_CHANGED\"}}}", true);
+            clock.addAndGet(TimeUnit.MINUTES.toMillis(15) - 1);
+            listener.get().onPong(socket, ByteBuffer.allocate(0));
+            tick.get().run();
+            assertTrue(paths.isEmpty());
+            clock.incrementAndGet();
+            tick.get().run();
+            tick.get().run();
+            assertEquals(List.of("/hmip/home/getCurrentState"), paths);
+
+            child.accept(access.inventory().get(child.key()));
+            child.getThing().setStatusInfo(ThingStatusInfoBuilder.create(ThingStatus.ONLINE).build());
+            var channel = new ChannelUID(child.getThing().getUID(), "ch1_on");
+            clearInvocations(childCallback);
+            child.handleCommand(channel, OnOffType.OFF);
+            verify(childCallback).stateUpdated(channel, OnOffType.ON);
+            assertEquals(List.of("/hmip/home/getCurrentState", "/hmip/device/control/setSwitchState"), paths);
+            assertEquals(Instant.ofEpochMilli(clock.get() + 1_800_000).toString(),
+                    access.getThing().getProperties().get("cloudRetryAt"));
+            paths.clear();
+            clock.addAndGet(1_799_999);
+            child.bridgeOffline();
+            child.handleCommand(channel, OnOffType.OFF);
+            verify(childCallback, times(2)).stateUpdated(channel, OnOffType.ON);
+            tick.get().run();
+            assertTrue(paths.isEmpty());
             verify(transport, times(1)).connect(any(), any(), any());
             clock.incrementAndGet();
             tick.get().run();
-            assertEquals(initial, paths.subList(3, paths.size()));
+            assertEquals(initial, paths);
+            assertFalse(access.getThing().getProperties().containsKey("cloudRetryAt"));
             verify(transport, times(2)).connect(any(), any(), any());
         } finally {
             access.dispose();

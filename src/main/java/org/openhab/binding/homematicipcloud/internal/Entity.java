@@ -89,7 +89,6 @@ final class Entity extends BaseThingHandler {
     }
 
     void bridgeOffline() {
-        points = Map.of();
         updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.BRIDGE_OFFLINE);
     }
 
@@ -190,19 +189,26 @@ final class Entity extends BaseThingHandler {
         }
     }
 
+    void restore(String id) {
+        Points.Point point = points.get(id);
+        if (point == null) {
+            updateState(id, UnDefType.UNDEF);
+        } else {
+            publish(point);
+        }
+    }
+
     @Override
     public void handleCommand(ChannelUID uid, Command command) {
-        Points.Point p = points.get(uid.getId());
-        if (p == null) {
-            return;
-        }
         if (command == RefreshType.REFRESH) {
-            publish(p);
+            restore(uid.getId());
             return;
         }
         Access parent = access();
-        if (parent != null && getThing().getStatus() == ThingStatus.ONLINE) {
+        if (parent != null) {
             parent.command(this, uid.getId(), command);
+        } else {
+            restore(uid.getId());
         }
     }
 }

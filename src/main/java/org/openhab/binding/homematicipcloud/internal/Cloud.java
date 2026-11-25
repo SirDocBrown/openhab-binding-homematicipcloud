@@ -13,6 +13,7 @@
 package org.openhab.binding.homematicipcloud.internal;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -100,6 +101,8 @@ final class Cloud implements AutoCloseable {
         characteristics.addProperty("id", this.serial);
     }
 
+    static final Duration MAX_THROTTLE = Duration.ofHours(6);
+
     static final class Status extends IOException {
         private static final long serialVersionUID = 1L;
 
@@ -116,15 +119,14 @@ final class Cloud implements AutoCloseable {
         long retryAt(long now) {
             long minimum = now + Duration.ofMinutes(15).toMillis();
             try {
-                long seconds = Long.parseLong(retryAfter.strip());
-                return Math.max(minimum, Math.addExact(now, Math.multiplyExact(seconds, 1000)));
-            } catch (ArithmeticException e) {
-                return Long.MAX_VALUE;
+                long seconds = new BigInteger(retryAfter.strip()).max(BigInteger.ZERO)
+                        .min(BigInteger.valueOf(MAX_THROTTLE.toSeconds())).longValueExact();
+                return Math.max(minimum, now + seconds * 1000);
             } catch (NumberFormatException e) {
                 try {
                     long date = ZonedDateTime.parse(retryAfter.strip(), DateTimeFormatter.RFC_1123_DATE_TIME)
                             .toInstant().toEpochMilli();
-                    return Math.max(minimum, date);
+                    return Math.clamp(date, minimum, now + MAX_THROTTLE.toMillis());
                 } catch (DateTimeParseException ignored) {
                     return minimum;
                 }

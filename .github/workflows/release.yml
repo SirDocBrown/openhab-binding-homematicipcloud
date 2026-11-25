@@ -5,6 +5,10 @@ on:
     branches: [main]
     tags: ['v*']
 
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -13,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.assets.outputs.tag }}
+      publish: ${{ steps.assets.outputs.publish }}
     steps:
       - name: Check out binding
         uses: actions/checkout@v4
@@ -54,13 +59,18 @@ jobs:
           jar="reactor/bundles/$binding/target/$binding-$version.jar"
           manifest_version=$(unzip -p "$jar" META-INF/MANIFEST.MF | tr -d '\r' | sed -n 's/^Bundle-Version: //p')
           [[ "$manifest_version" == "$version" ]]
+          subject="${COMMIT_MESSAGE%%$'\n'*}"
+          publish=false
           tag="v$version"
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            publish=true
             tag="$GITHUB_REF_NAME"
-          elif [[ "$COMMIT_MESSAGE" == 'Release v'* ]]; then
-            tag="${COMMIT_MESSAGE#Release }"
+          elif [[ "$subject" == 'Release v'* ]]; then
+            publish=true
+            tag="${subject#Release }"
           fi
           [[ "$tag" == "v$version" ]]
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           mkdir assets
           cp "$jar" "assets/$binding-${tag#v}.jar"
@@ -73,7 +83,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release v'))
+    if: needs.build.outputs.publish == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -90,6 +100,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            exit 0
+          fi
           sha256sum -c SHA256SUMS
           if [[ "$GITHUB_REF_TYPE" == branch ]]; then
             if ! sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha'); then

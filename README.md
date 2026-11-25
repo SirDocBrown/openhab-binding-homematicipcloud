@@ -8,7 +8,7 @@ Connect Homematic IP devices to openHAB through an internet-connected access poi
 
 ## Install and pair an access point
 
-1. Download `org.openhab.binding.homematicipcloud-<version>.jar` from the release assets (for example, `org.openhab.binding.homematicipcloud-0.4.0.jar`). To verify it, download `SHA256SUMS` into the same folder and run `shasum -a 256 -c SHA256SUMS` on macOS or `sha256sum -c SHA256SUMS` on Linux.
+1. Download `org.openhab.binding.homematicipcloud-<version>.jar` from the release assets (for example, `org.openhab.binding.homematicipcloud-0.4.1.jar`). To verify it, download `SHA256SUMS` into the same folder and run `shasum -a 256 -c SHA256SUMS` on macOS or `sha256sum -c SHA256SUMS` on Linux.
 2. Copy the JAR into your openHAB add-ons folder. With Docker or QNAP Container Station, use the host folder mounted at `/openhab/addons`. The container user must be able to open the folder and read the file.
 3. In **Settings → Things → + → Homematic IP Cloud**, add a **Homematic IP Access Point** bridge. Enter the 24-character SGTIN printed on the access point and the system PIN if configured. Leave the token empty for initial pairing.
 4. When the bridge requests confirmation, briefly press the system button on the access point. The pairing window lasts two minutes. The bridge saves the confirmed token in its configuration.
@@ -20,9 +20,9 @@ For an HmIP-SWDM window contact, link `ch1_windowState` to a Contact Item. Open 
 
 The default scan lists end devices. To include heating or switching groups, enable **Discover Groups** on the bridge and scan again. Existing groups continue to receive updates when group discovery is switched off. You can also add a device or group manually using its cloud ID.
 
-The bridge reads one snapshot when it connects or reconnects. During a healthy connection, device and group changes arrive by WebSocket. Opening dashboards, refreshing Items and scanning the Inbox use cached data. Only explicit device commands make REST requests during normal operation. Incomplete push events are skipped until a complete update or the next connection.
+The bridge reads one snapshot when it connects or reconnects. During a healthy connection, device and group changes arrive by WebSocket. Opening dashboards, refreshing Items and scanning the Inbox use cached data. The bridge refreshes the full state about every six hours (randomly staggered by up to 30 minutes either way). Malformed device or group events share one earlier refresh, at least 15 minutes after the last snapshot. Device commands also use REST.
 
-After HTTP 429, the bridge pauses all cloud traffic for at least 15 minutes and honours longer Retry-After values. It remembers the deadline across restarts and discards commands during the pause. Other clients using the same installation must observe the pause separately.
+After HTTP 429, the bridge pauses all cloud traffic for at least 15 minutes and honours longer Retry-After values up to six hours. It remembers the deadline across restarts and discards commands during the pause. Rejected commands restore the channel’s last known state. Other clients using the same installation must observe the pause separately.
 
 ## Channels
 
@@ -69,7 +69,7 @@ Contact KitchenWindow "Kitchen Window" { channel="homematicipcloud:device:home:k
 - **Missing channel or command.** Include the device model, binding and openHAB versions, channel ID and observed behaviour in your issue. Remove tokens, PINs, serial numbers and personal device IDs from logs and screenshots.
 
 ```sh
-docker exec -u openhab openhab sha256sum /openhab/addons/org.openhab.binding.homematicipcloud-0.4.0.jar
+docker exec -u openhab openhab sha256sum /openhab/addons/org.openhab.binding.homematicipcloud-0.4.1.jar
 ```
 
 ## Licence and protocol references
